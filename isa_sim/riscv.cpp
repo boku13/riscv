@@ -61,6 +61,14 @@ Riscv::Riscv(uint32_t baseAddr /*= 0*/, uint32_t len /*= 0*/)
     m_stats_if           = NULL;
     m_console            = NULL;
     m_has_breakpoints    = false;
+    m_branch_predictor_mode = 1;  // Default: static prediction
+
+    // Initialize branch predictor tables
+    for (int i = 0; i < 256; i++)
+    {
+        m_bht_1bit[i] = 0;  // Initialize to not-taken
+        m_bht_2bit[i] = 1;  // Initialize to weakly not-taken (01)
+    }
 
     // Some memory defined
     if (len != 0)
@@ -1113,8 +1121,22 @@ void Riscv::execute(void)
         // ['bimm12hi', 'rs1', 'rs2', 'bimm12lo']
         DPRINTF(LOG_INST,("%08x: beq r%d, r%d, %d\n", pc, rs1, rs2, bimm));
         INST_STAT(ENUM_INST_BEQ);
-        if (reg_rs1 == reg_rs2)
-            pc += bimm;
+        
+        uint32_t branch_target = pc + bimm;
+        bool branch_taken = (reg_rs1 == reg_rs2);
+        bool predicted_taken = predict_branch(pc, branch_target);
+        
+        // Update predictor
+        update_branch_predictor(pc, branch_taken);
+        
+        // Track prediction accuracy
+        if (predicted_taken == branch_taken)
+            m_stats[STATS_BRANCHES_PRED_CORRECT]++;
+        else
+            m_stats[STATS_BRANCHES_PRED_INCORRECT]++;
+        
+        if (branch_taken)
+            pc = branch_target;
         else
             pc += 4;
 
@@ -1128,8 +1150,20 @@ void Riscv::execute(void)
         // ['bimm12hi', 'rs1', 'rs2', 'bimm12lo']
         DPRINTF(LOG_INST,("%08x: bne r%d, r%d, %d\n", pc, rs1, rs2, bimm));
         INST_STAT(ENUM_INST_BNE);
-        if (reg_rs1 != reg_rs2)
-            pc += bimm;
+        
+        uint32_t branch_target = pc + bimm;
+        bool branch_taken = (reg_rs1 != reg_rs2);
+        bool predicted_taken = predict_branch(pc, branch_target);
+        
+        update_branch_predictor(pc, branch_taken);
+        
+        if (predicted_taken == branch_taken)
+            m_stats[STATS_BRANCHES_PRED_CORRECT]++;
+        else
+            m_stats[STATS_BRANCHES_PRED_INCORRECT]++;
+        
+        if (branch_taken)
+            pc = branch_target;
         else
             pc += 4;
 
@@ -1143,8 +1177,20 @@ void Riscv::execute(void)
         // ['bimm12hi', 'rs1', 'rs2', 'bimm12lo']
         DPRINTF(LOG_INST,("%08x: blt r%d, r%d, %d\n", pc, rs1, rs2, bimm));
         INST_STAT(ENUM_INST_BLT);
-        if ((signed)reg_rs1 < (signed)reg_rs2)
-            pc += bimm;
+        
+        uint32_t branch_target = pc + bimm;
+        bool branch_taken = ((signed)reg_rs1 < (signed)reg_rs2);
+        bool predicted_taken = predict_branch(pc, branch_target);
+        
+        update_branch_predictor(pc, branch_taken);
+        
+        if (predicted_taken == branch_taken)
+            m_stats[STATS_BRANCHES_PRED_CORRECT]++;
+        else
+            m_stats[STATS_BRANCHES_PRED_INCORRECT]++;
+        
+        if (branch_taken)
+            pc = branch_target;
         else
             pc += 4;
 
@@ -1158,8 +1204,20 @@ void Riscv::execute(void)
         // ['bimm12hi', 'rs1', 'rs2', 'bimm12lo']
         DPRINTF(LOG_INST,("%08x: bge r%d, r%d, %d\n", pc, rs1, rs2, bimm));
         INST_STAT(ENUM_INST_BGE);
-        if ((signed)reg_rs1 >= (signed)reg_rs2)
-            pc += bimm;
+        
+        uint32_t branch_target = pc + bimm;
+        bool branch_taken = ((signed)reg_rs1 >= (signed)reg_rs2);
+        bool predicted_taken = predict_branch(pc, branch_target);
+        
+        update_branch_predictor(pc, branch_taken);
+        
+        if (predicted_taken == branch_taken)
+            m_stats[STATS_BRANCHES_PRED_CORRECT]++;
+        else
+            m_stats[STATS_BRANCHES_PRED_INCORRECT]++;
+        
+        if (branch_taken)
+            pc = branch_target;
         else
             pc += 4;
 
@@ -1173,8 +1231,20 @@ void Riscv::execute(void)
         // ['bimm12hi', 'rs1', 'rs2', 'bimm12lo']
         DPRINTF(LOG_INST,("%08x: bltu r%d, r%d, %d\n", pc, rs1, rs2, bimm));
         INST_STAT(ENUM_INST_BLTU);
-        if ((unsigned)reg_rs1 < (unsigned)reg_rs2)
-            pc += bimm;
+        
+        uint32_t branch_target = pc + bimm;
+        bool branch_taken = ((unsigned)reg_rs1 < (unsigned)reg_rs2);
+        bool predicted_taken = predict_branch(pc, branch_target);
+        
+        update_branch_predictor(pc, branch_taken);
+        
+        if (predicted_taken == branch_taken)
+            m_stats[STATS_BRANCHES_PRED_CORRECT]++;
+        else
+            m_stats[STATS_BRANCHES_PRED_INCORRECT]++;
+        
+        if (branch_taken)
+            pc = branch_target;
         else
             pc += 4;
 
@@ -1188,8 +1258,20 @@ void Riscv::execute(void)
         // ['bimm12hi', 'rs1', 'rs2', 'bimm12lo']
         DPRINTF(LOG_INST,("%08x: bgeu r%d, r%d, %d\n", pc, rs1, rs2, bimm));
         INST_STAT(ENUM_INST_BGEU);
-        if ((unsigned)reg_rs1 >= (unsigned)reg_rs2)
-            pc += bimm;
+        
+        uint32_t branch_target = pc + bimm;
+        bool branch_taken = ((unsigned)reg_rs1 >= (unsigned)reg_rs2);
+        bool predicted_taken = predict_branch(pc, branch_target);
+        
+        update_branch_predictor(pc, branch_taken);
+        
+        if (predicted_taken == branch_taken)
+            m_stats[STATS_BRANCHES_PRED_CORRECT]++;
+        else
+            m_stats[STATS_BRANCHES_PRED_INCORRECT]++;
+        
+        if (branch_taken)
+            pc = branch_target;
         else
             pc += 4;
 
@@ -1574,25 +1656,39 @@ void Riscv::step(void)
     uint32_t branches_before = m_stats[STATS_BRANCHES];
     uint32_t mul_before = m_stats[STATS_MULTIPLIES];
     uint32_t div_before = m_stats[STATS_DIVIDES];
+    uint32_t pred_incorrect_before = m_stats[STATS_BRANCHES_PRED_INCORRECT];
+    uint32_t pred_correct_before = m_stats[STATS_BRANCHES_PRED_CORRECT];
 
     // Execute instruction at current PC
     execute();
     
-    // Calculate cycle cost for this instruction (simplified model)
-    // Base: 1 cycle per instruction
-    // Load/Store: +1 cycle (memory access)
-    // Multiply: +2 cycles
-    // Divide: +10 cycles
-    uint32_t cycles = 1;
+    // Pipeline-accurate cycle model:
+    // - Base: 1 cycle per instruction (pipelined execution)
+    // - Stalls occur only for specific hazards:
+    //   * Branch resolution (Mode 0): All conditional branches stall 2 cycles
+    //   * Branch misprediction (Mode 1-3): Only mispredictions stall 2 cycles
+    //   * Divide: Multi-cycle operation, stalls pipeline for 10 cycles
+    uint32_t cycles = 1;  // Base: 1 cycle per instruction in pipelined processor
     
-    if (m_stats[STATS_LOADS] > loads_before)
-        cycles += 1;  // Load instructions take 2 cycles
-    else if (m_stats[STATS_STORES] > stores_before)
-        cycles += 1;  // Store instructions take 2 cycles
-    else if (m_stats[STATS_MULTIPLIES] > mul_before)
-        cycles += 2;  // Multiply instructions take 3 cycles
-    else if (m_stats[STATS_DIVIDES] > div_before)
-        cycles += 10; // Divide instructions take 11 cycles
+    // Branch penalties:
+    // Mode 0: All conditional branches take 2 cycles to resolve (no predictor)
+    // Mode 1-3: Only mispredicted branches take 2 cycles (pipeline flush)
+    if (m_branch_predictor_mode == 0)
+    {
+        // Without predictor: all conditional branches pay resolution penalty
+        if (m_stats[STATS_BRANCHES_PRED_CORRECT] + m_stats[STATS_BRANCHES_PRED_INCORRECT] > 
+            pred_correct_before + pred_incorrect_before)
+            cycles += 2;  // Branch resolution stall
+    }
+    else if (m_stats[STATS_BRANCHES_PRED_INCORRECT] > pred_incorrect_before)
+    {
+        // With predictor: only mispredictions pay penalty
+        cycles += 2;  // Pipeline flush on misprediction
+    }
+    
+    // Divide operations stall the pipeline (non-pipelined unit)
+    if (m_stats[STATS_DIVIDES] > div_before)
+        cycles += 10;  // Divide takes 11 cycles total
     
     m_stats[STATS_CYCLES] += cycles;
 
@@ -1628,6 +1724,76 @@ void Riscv::set_interrupt(int irq)
 {
     assert(irq == 0);
     m_csr_mip |= SR_IP_MEIP;
+}
+//-----------------------------------------------------------------
+// predict_branch: Predict if a branch will be taken
+//-----------------------------------------------------------------
+bool Riscv::predict_branch(uint32_t pc, uint32_t target)
+{
+    bool predicted_taken = false;
+    
+    switch (m_branch_predictor_mode)
+    {
+        case 0: // No prediction (always not-taken)
+            predicted_taken = false;
+            break;
+            
+        case 1: // Static prediction (backward taken, forward not-taken)
+            predicted_taken = (target < pc);  // Backward branch = taken
+            break;
+            
+        case 2: // 1-bit BHT
+        {
+            uint8_t index = (pc >> 2) & 0xFF;
+            predicted_taken = (m_bht_1bit[index] != 0);
+            break;
+        }
+        
+        case 3: // 2-bit saturating counter
+        {
+            uint8_t index = (pc >> 2) & 0xFF;
+            predicted_taken = (m_bht_2bit[index] >= 2);  // MSB set = taken
+            break;
+        }
+        
+        default:
+            predicted_taken = false;
+            break;
+    }
+    
+    return predicted_taken;
+}
+//-----------------------------------------------------------------
+// update_branch_predictor: Update predictor state after branch resolution
+//-----------------------------------------------------------------
+void Riscv::update_branch_predictor(uint32_t pc, bool taken)
+{
+    if (m_branch_predictor_mode == 0 || m_branch_predictor_mode == 1)
+        return;  // No state to update for no-prediction or static prediction
+        
+    uint8_t index = (pc >> 2) & 0xFF;
+    
+    if (m_branch_predictor_mode == 2)
+    {
+        // 1-bit BHT: Simply update with actual outcome
+        m_bht_1bit[index] = taken ? 1 : 0;
+    }
+    else if (m_branch_predictor_mode == 3)
+    {
+        // 2-bit saturating counter
+        if (taken)
+        {
+            // Increment (saturate at 3)
+            if (m_bht_2bit[index] < 3)
+                m_bht_2bit[index]++;
+        }
+        else
+        {
+            // Decrement (saturate at 0)
+            if (m_bht_2bit[index] > 0)
+                m_bht_2bit[index]--;
+        }
+    }
 }
 //-----------------------------------------------------------------
 // stats_reset: Reset runtime stats
@@ -1667,6 +1833,35 @@ void Riscv::stats_dump(void)
             printf( "- Branches %d (%d%%)\n", m_stats[STATS_BRANCHES], (m_stats[STATS_BRANCHES] * 100)  / m_stats[STATS_INSTRUCTIONS]);
             printf( "- Multiplies %d (%d%%)\n", m_stats[STATS_MULTIPLIES], (m_stats[STATS_MULTIPLIES] * 100)  / m_stats[STATS_INSTRUCTIONS]);
             printf( "- Divides %d (%d%%)\n", m_stats[STATS_DIVIDES], (m_stats[STATS_DIVIDES] * 100)  / m_stats[STATS_INSTRUCTIONS]);
+            
+            // Branch prediction statistics
+            if (m_branch_predictor_mode > 0 && m_stats[STATS_BRANCHES] > 0)
+            {
+                uint32_t total_predictions = m_stats[STATS_BRANCHES_PRED_CORRECT] + m_stats[STATS_BRANCHES_PRED_INCORRECT];
+                if (total_predictions > 0)
+                {
+                    double accuracy = (double)m_stats[STATS_BRANCHES_PRED_CORRECT] * 100.0 / (double)total_predictions;
+                    const char* pred_mode = "Unknown";
+                    switch(m_branch_predictor_mode)
+                    {
+                        case 1: pred_mode = "Static"; break;
+                        case 2: pred_mode = "1-bit BHT"; break;
+                        case 3: pred_mode = "2-bit BHT"; break;
+                    }
+                    printf( "\nBranch Prediction (%s):\n", pred_mode);
+                    printf( "- Predictions: %d\n", total_predictions);
+                    printf( "- Correct: %d (%.1f%%)\n", m_stats[STATS_BRANCHES_PRED_CORRECT], accuracy);
+                    printf( "- Incorrect: %d (%.1f%%)\n", m_stats[STATS_BRANCHES_PRED_INCORRECT], 100.0 - accuracy);
+                    
+                    // Estimate cycle savings
+                    // Assume: Correct prediction = 0 penalty, Misprediction = 2 cycle penalty
+                    uint32_t cycles_saved = m_stats[STATS_BRANCHES_PRED_CORRECT] * 2;
+                    uint32_t old_cpi_cycles = m_stats[STATS_CYCLES] + (m_stats[STATS_BRANCHES_PRED_CORRECT] * 2);
+                    double old_cpi = (double)old_cpi_cycles / (double)m_stats[STATS_INSTRUCTIONS];
+                    printf( "- Estimated CPI without prediction: %.2f\n", old_cpi);
+                    printf( "- Cycles saved: %d\n", cycles_saved);
+                }
+            }
         }
     }
 

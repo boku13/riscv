@@ -71,6 +71,8 @@ enum eStats
     STATS_CYCLES,
     STATS_MULTIPLIES,
     STATS_DIVIDES,
+    STATS_BRANCHES_PRED_CORRECT,
+    STATS_BRANCHES_PRED_INCORRECT,
     STATS_MAX
 };
 
@@ -141,6 +143,7 @@ public:
 
     void                set_stats_interface(IStatsInterface *stats) { m_stats_if = stats; }
     void                set_console(IConsoleIO *cio)                { m_console = cio; }
+    void                set_branch_predictor(int mode)              { m_branch_predictor_mode = mode; }
 
     void                stats_reset(void);
     void                stats_dump(void);
@@ -151,6 +154,10 @@ protected:
     void                execute(void);
     int                 load(uint32_t pc, uint32_t address, uint32_t *result, int width, bool signedLoad);
     int                 store(uint32_t pc, uint32_t address, uint32_t data, int width);
+    
+    // Branch prediction helpers
+    bool                predict_branch(uint32_t pc, uint32_t target);
+    void                update_branch_predictor(uint32_t pc, bool taken);
     uint32_t            access_csr(uint32_t address, uint32_t data, bool set, bool clr);
     void                exception(uint32_t cause, uint32_t pc, uint32_t badaddr = 0);
 
@@ -210,6 +217,11 @@ private:
     // Stats
     uint32_t            m_stats[STATS_MAX];
     IStatsInterface     *m_stats_if;
+
+    // Branch Prediction (for cycle modeling)
+    int                 m_branch_predictor_mode; // 0=none, 1=static, 2=1-bit, 3=2-bit
+    uint8_t             m_bht_1bit[256];         // 1-bit branch history table
+    uint8_t             m_bht_2bit[256];         // 2-bit saturating counters
 
     // Console
     IConsoleIO         *m_console;

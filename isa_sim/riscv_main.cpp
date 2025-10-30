@@ -43,6 +43,7 @@
 #include <stdlib.h>
 #include <assert.h>
 #include <unistd.h>
+#include <time.h>
 
 #include "riscv.h"
 #include "elf_load.h"
@@ -84,9 +85,10 @@ int riscv_main(cosim_cpu_api *sim, int argc, char *argv[])
     char *   dump_file      = NULL;
     char *   dump_sym_start = NULL;
     char *   dump_sym_end   = NULL;
+    int      branch_predictor_mode = 1;  // Default: static prediction
     int c;
 
-    while ((c = getopt (argc, argv, "t:v:f:c:r:d:b:s:e:p:j:k:")) != -1)
+    while ((c = getopt (argc, argv, "t:v:f:c:r:d:b:s:e:p:j:k:B:")) != -1)
     {
         switch(c)
         {
@@ -125,6 +127,9 @@ int riscv_main(cosim_cpu_api *sim, int argc, char *argv[])
             case 'k':
                 dump_sym_end = optarg;
                 break;
+            case 'B':
+                branch_predictor_mode = strtoul(optarg, NULL, 0);
+                break;
             case '?':
             default:
                 help = 1;   
@@ -143,6 +148,7 @@ int riscv_main(cosim_cpu_api *sim, int argc, char *argv[])
         fprintf (stderr,"-e 0xnnnn       = Trace from PC address\n");
         fprintf (stderr,"-b 0xnnnn       = Memory base address (for binary loads)\n");
         fprintf (stderr,"-s nnnn         = Memory size (for binary loads)\n");
+        fprintf (stderr,"-B [0-3]        = Branch predictor mode (0=none, 1=static, 2=1-bit BHT, 3=2-bit BHT)\n");
         fprintf (stderr,"-p dumpfile.bin = Post simulation memory dump file\n");
         fprintf (stderr,"-j sym_name     = Symbol for memory dump start\n");
         fprintf (stderr,"-k sym_name     = Symbol for memory dump end\n");
@@ -173,11 +179,18 @@ int riscv_main(cosim_cpu_api *sim, int argc, char *argv[])
         // Reset CPU to given start PC
         sim->reset(start_addr);
 
+        // Set branch predictor mode (cast to Riscv* to access extended API)
+        ((Riscv*)sim)->set_branch_predictor(branch_predictor_mode);
+
         // Enable trace?
         if (trace)
             sim->enable_trace(trace_mask);
 
         _cycles = 0;
+
+        // Start wall-clock timer
+        struct timespec start_time, end_time;
+        clock_gettime(CLOCK_MONOTONIC, &start_time);
 
         uint32_t current_pc = 0;
         while (!sim->get_fault() && !sim->get_stopped() &&  current_pc != stop_pc)
@@ -193,6 +206,18 @@ int riscv_main(cosim_cpu_api *sim, int argc, char *argv[])
             if (trace_pc == current_pc)
                 sim->enable_trace(trace_mask);
         }   
+
+        // End wall-clock timer
+        clock_gettime(CLOCK_MONOTONIC, &end_time);
+        
+        // Calculate elapsed time in seconds
+        double elapsed = (end_time.tv_sec - start_time.tv_sec) + 
+                        (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
+        
+        printf("\n=== Simulation Performance ===\n");
+        printf("Wall-clock time: %.3f seconds\n", elapsed);
+        printf("Simulation speed: %.2f MIPS (Million Instructions Per Second)\n", 
+               _cycles / elapsed / 1e6);
 
         cosim::instance()->at_exit(sim->get_fault());
     }
