@@ -1302,6 +1302,7 @@ void Riscv::execute(void)
         // ['rd', 'rs1', 'rs2']
         DPRINTF(LOG_INST,("%08x: mul r%d, r%d, r%d\n", pc, rd, rs1, rs2));
         INST_STAT(ENUM_INST_MUL);
+        m_stats[STATS_MULTIPLIES]++;
         reg_rd = (signed)reg_rs1 * (signed)reg_rs2;
         pc += 4;        
     }
@@ -1310,6 +1311,7 @@ void Riscv::execute(void)
         // ['rd', 'rs1', 'rs2']
         long long res = ((long long) (int)reg_rs1) * ((long long)(int)reg_rs2);
         INST_STAT(ENUM_INST_MULH);
+        m_stats[STATS_MULTIPLIES]++;
         DPRINTF(LOG_INST,("%08x: mulh r%d, r%d, r%d\n", pc, rd, rs1, rs2));
         reg_rd = (int)(res >> 32);
         pc += 4;
@@ -1319,6 +1321,7 @@ void Riscv::execute(void)
         // ['rd', 'rs1', 'rs2']
         long long res = ((long long) (int)reg_rs1) * ((unsigned long long)(unsigned)reg_rs2);
         INST_STAT(ENUM_INST_MULHSU);
+        m_stats[STATS_MULTIPLIES]++;
         DPRINTF(LOG_INST,("%08x: mulhsu r%d, r%d, r%d\n", pc, rd, rs1, rs2));
         reg_rd = (int)(res >> 32);
         pc += 4;
@@ -1328,6 +1331,7 @@ void Riscv::execute(void)
         // ['rd', 'rs1', 'rs2']
         unsigned long long res = ((unsigned long long) (unsigned)reg_rs1) * ((unsigned long long)(unsigned)reg_rs2);
         INST_STAT(ENUM_INST_MULHU);
+        m_stats[STATS_MULTIPLIES]++;
         DPRINTF(LOG_INST,("%08x: mulhu r%d, r%d, r%d\n", pc, rd, rs1, rs2));
         reg_rd = (int)(res >> 32);
         pc += 4;
@@ -1337,6 +1341,7 @@ void Riscv::execute(void)
         // ['rd', 'rs1', 'rs2']
         DPRINTF(LOG_INST,("%08x: div r%d, r%d, r%d\n", pc, rd, rs1, rs2));
         INST_STAT(ENUM_INST_DIV);
+        m_stats[STATS_DIVIDES]++;
         if ((signed)reg_rs1 == INT32_MIN && (signed)reg_rs2 == -1)
             reg_rd = reg_rs1;
         else if (reg_rs2 != 0)
@@ -1350,6 +1355,7 @@ void Riscv::execute(void)
         // ['rd', 'rs1', 'rs2']
         DPRINTF(LOG_INST,("%08x: divu r%d, r%d, r%d\n", pc, rd, rs1, rs2));
         INST_STAT(ENUM_INST_DIVU);
+        m_stats[STATS_DIVIDES]++;
         if (reg_rs2 != 0)
             reg_rd = (unsigned)reg_rs1 / (unsigned)reg_rs2;
         else
@@ -1361,6 +1367,7 @@ void Riscv::execute(void)
         // ['rd', 'rs1', 'rs2']
         DPRINTF(LOG_INST,("%08x: rem r%d, r%d, r%d\n", pc, rd, rs1, rs2));
         INST_STAT(ENUM_INST_REM);
+        m_stats[STATS_DIVIDES]++;
 
         if((signed)reg_rs1 == INT32_MIN && (signed)reg_rs2 == -1)
             reg_rd = 0;
@@ -1375,6 +1382,7 @@ void Riscv::execute(void)
         // ['rd', 'rs1', 'rs2']
         DPRINTF(LOG_INST,("%08x: remu r%d, r%d, r%d\n", pc, rd, rs1, rs2));
         INST_STAT(ENUM_INST_REMU);
+        m_stats[STATS_DIVIDES]++;
         if (reg_rs2 != 0)
             reg_rd = (unsigned)reg_rs1 % (unsigned)reg_rs2;
         else
@@ -1559,9 +1567,34 @@ void Riscv::execute(void)
 void Riscv::step(void)
 {
     m_stats[STATS_INSTRUCTIONS]++;
+    
+    // Track instruction counts before execution
+    uint32_t loads_before = m_stats[STATS_LOADS];
+    uint32_t stores_before = m_stats[STATS_STORES];
+    uint32_t branches_before = m_stats[STATS_BRANCHES];
+    uint32_t mul_before = m_stats[STATS_MULTIPLIES];
+    uint32_t div_before = m_stats[STATS_DIVIDES];
 
     // Execute instruction at current PC
     execute();
+    
+    // Calculate cycle cost for this instruction (simplified model)
+    // Base: 1 cycle per instruction
+    // Load/Store: +1 cycle (memory access)
+    // Multiply: +2 cycles
+    // Divide: +10 cycles
+    uint32_t cycles = 1;
+    
+    if (m_stats[STATS_LOADS] > loads_before)
+        cycles += 1;  // Load instructions take 2 cycles
+    else if (m_stats[STATS_STORES] > stores_before)
+        cycles += 1;  // Store instructions take 2 cycles
+    else if (m_stats[STATS_MULTIPLIES] > mul_before)
+        cycles += 2;  // Multiply instructions take 3 cycles
+    else if (m_stats[STATS_DIVIDES] > div_before)
+        cycles += 10; // Divide instructions take 11 cycles
+    
+    m_stats[STATS_CYCLES] += cycles;
 
     // Increment timer counter
     m_csr_mtime++;
@@ -1620,11 +1653,20 @@ void Riscv::stats_dump(void)
     {
         printf( "Runtime Stats:\n");
         printf( "- Total Instructions %d\n", m_stats[STATS_INSTRUCTIONS]);
+        printf( "- Total Cycles %d\n", m_stats[STATS_CYCLES]);
+        
         if (m_stats[STATS_INSTRUCTIONS] > 0)
         {
+            // Calculate CPI (Cycles Per Instruction)
+            double cpi = (double)m_stats[STATS_CYCLES] / (double)m_stats[STATS_INSTRUCTIONS];
+            printf( "- CPI (Cycles Per Instruction) %.2f\n", cpi);
+            printf( "- IPC (Instructions Per Cycle) %.2f\n", 1.0/cpi);
+            
             printf( "- Loads %d (%d%%)\n",  m_stats[STATS_LOADS],  (m_stats[STATS_LOADS] * 100)  / m_stats[STATS_INSTRUCTIONS]);
             printf( "- Stores %d (%d%%)\n", m_stats[STATS_STORES], (m_stats[STATS_STORES] * 100) / m_stats[STATS_INSTRUCTIONS]);
-            printf( "- Branches Operations %d (%d%%)\n", m_stats[STATS_BRANCHES], (m_stats[STATS_BRANCHES] * 100)  / m_stats[STATS_INSTRUCTIONS]);
+            printf( "- Branches %d (%d%%)\n", m_stats[STATS_BRANCHES], (m_stats[STATS_BRANCHES] * 100)  / m_stats[STATS_INSTRUCTIONS]);
+            printf( "- Multiplies %d (%d%%)\n", m_stats[STATS_MULTIPLIES], (m_stats[STATS_MULTIPLIES] * 100)  / m_stats[STATS_INSTRUCTIONS]);
+            printf( "- Divides %d (%d%%)\n", m_stats[STATS_DIVIDES], (m_stats[STATS_DIVIDES] * 100)  / m_stats[STATS_INSTRUCTIONS]);
         }
     }
 
