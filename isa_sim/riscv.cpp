@@ -278,6 +278,31 @@ void Riscv::reset(uint32_t start_addr)
     m_break       = false;
     m_trace       = 0;
 
+    // Initialize pipeline registers for data forwarding
+    m_pipe_e1.valid = false;
+    m_pipe_e1.rd = 0;
+    m_pipe_e1.value = 0;
+    m_pipe_e1.is_load = false;
+    m_pipe_e1.is_mul = false;
+    m_pipe_e1.is_div = false;
+    m_pipe_e1.pc = 0;
+
+    m_pipe_e2.valid = false;
+    m_pipe_e2.rd = 0;
+    m_pipe_e2.value = 0;
+    m_pipe_e2.is_load = false;
+    m_pipe_e2.is_mul = false;
+    m_pipe_e2.is_div = false;
+    m_pipe_e2.pc = 0;
+
+    m_pipe_wb.valid = false;
+    m_pipe_wb.rd = 0;
+    m_pipe_wb.value = 0;
+    m_pipe_wb.is_load = false;
+    m_pipe_wb.is_mul = false;
+    m_pipe_wb.is_div = false;
+    m_pipe_wb.pc = 0;
+
     stats_reset();
 }
 //-----------------------------------------------------------------
@@ -914,6 +939,11 @@ void Riscv::execute(void)
     uint32_t reg_rs2 = m_gpr[rs2];
     uint32_t pc      = m_pc;
 
+    // Track instruction type for pipeline modeling
+    bool is_load_inst = false;
+    bool is_mul_inst = false;
+    bool is_div_inst = false;
+
     bool take_exception = false;
 
     DPRINTF(LOG_OPCODES,( "%08x: %08x\n", pc, opcode));
@@ -1285,6 +1315,7 @@ void Riscv::execute(void)
         // ['rd', 'rs1', 'imm12']
         DPRINTF(LOG_INST,("%08x: lb r%d, %d(r%d)\n", pc, rd, imm12, rs1));
         INST_STAT(ENUM_INST_LB);
+        is_load_inst = true;
         if (load(pc, reg_rs1 + imm12, &reg_rd, 1, true))
             pc += 4;
         else
@@ -1295,6 +1326,7 @@ void Riscv::execute(void)
         // ['rd', 'rs1', 'imm12']
         DPRINTF(LOG_INST,("%08x: lh r%d, %d(r%d)\n", pc, rd, imm12, rs1));
         INST_STAT(ENUM_INST_LH);
+        is_load_inst = true;
         if (load(pc, reg_rs1 + imm12, &reg_rd, 2, true))
             pc += 4;
         else
@@ -1305,6 +1337,7 @@ void Riscv::execute(void)
         // ['rd', 'rs1', 'imm12']        
         INST_STAT(ENUM_INST_LW);
         DPRINTF(LOG_INST,("%08x: lw r%d, %d(r%d)\n", pc, rd, imm12, rs1));
+        is_load_inst = true;
         if (load(pc, reg_rs1 + imm12, &reg_rd, 4, true))
             pc += 4;
         else
@@ -1315,6 +1348,7 @@ void Riscv::execute(void)
         // ['rd', 'rs1', 'imm12']
         DPRINTF(LOG_INST,("%08x: lbu r%d, %d(r%d)\n", pc, rd, imm12, rs1));
         INST_STAT(ENUM_INST_LBU);
+        is_load_inst = true;
         if (load(pc, reg_rs1 + imm12, &reg_rd, 1, false))
             pc += 4;
         else
@@ -1325,6 +1359,7 @@ void Riscv::execute(void)
         // ['rd', 'rs1', 'imm12']
         DPRINTF(LOG_INST,("%08x: lhu r%d, %d(r%d)\n", pc, rd, imm12, rs1));
         INST_STAT(ENUM_INST_LHU);
+        is_load_inst = true;
         if (load(pc, reg_rs1 + imm12, &reg_rd, 2, false))
             pc += 4;
         else
@@ -1335,6 +1370,7 @@ void Riscv::execute(void)
         // ['rd', 'rs1', 'imm12']
         DPRINTF(LOG_INST,("%08x: lwu r%d, %d(r%d)\n", pc, rd, imm12, rs1));
         INST_STAT(ENUM_INST_LWU);
+        is_load_inst = true;
         if (load(pc, reg_rs1 + imm12, &reg_rd, 4, false))
             pc += 4;
         else
@@ -1385,6 +1421,7 @@ void Riscv::execute(void)
         DPRINTF(LOG_INST,("%08x: mul r%d, r%d, r%d\n", pc, rd, rs1, rs2));
         INST_STAT(ENUM_INST_MUL);
         m_stats[STATS_MULTIPLIES]++;
+        is_mul_inst = true;
         reg_rd = (signed)reg_rs1 * (signed)reg_rs2;
         pc += 4;        
     }
@@ -1394,6 +1431,7 @@ void Riscv::execute(void)
         long long res = ((long long) (int)reg_rs1) * ((long long)(int)reg_rs2);
         INST_STAT(ENUM_INST_MULH);
         m_stats[STATS_MULTIPLIES]++;
+        is_mul_inst = true;
         DPRINTF(LOG_INST,("%08x: mulh r%d, r%d, r%d\n", pc, rd, rs1, rs2));
         reg_rd = (int)(res >> 32);
         pc += 4;
@@ -1404,6 +1442,7 @@ void Riscv::execute(void)
         long long res = ((long long) (int)reg_rs1) * ((unsigned long long)(unsigned)reg_rs2);
         INST_STAT(ENUM_INST_MULHSU);
         m_stats[STATS_MULTIPLIES]++;
+        is_mul_inst = true;
         DPRINTF(LOG_INST,("%08x: mulhsu r%d, r%d, r%d\n", pc, rd, rs1, rs2));
         reg_rd = (int)(res >> 32);
         pc += 4;
@@ -1414,6 +1453,7 @@ void Riscv::execute(void)
         unsigned long long res = ((unsigned long long) (unsigned)reg_rs1) * ((unsigned long long)(unsigned)reg_rs2);
         INST_STAT(ENUM_INST_MULHU);
         m_stats[STATS_MULTIPLIES]++;
+        is_mul_inst = true;
         DPRINTF(LOG_INST,("%08x: mulhu r%d, r%d, r%d\n", pc, rd, rs1, rs2));
         reg_rd = (int)(res >> 32);
         pc += 4;
@@ -1424,6 +1464,7 @@ void Riscv::execute(void)
         DPRINTF(LOG_INST,("%08x: div r%d, r%d, r%d\n", pc, rd, rs1, rs2));
         INST_STAT(ENUM_INST_DIV);
         m_stats[STATS_DIVIDES]++;
+        is_div_inst = true;
         if ((signed)reg_rs1 == INT32_MIN && (signed)reg_rs2 == -1)
             reg_rd = reg_rs1;
         else if (reg_rs2 != 0)
@@ -1438,6 +1479,7 @@ void Riscv::execute(void)
         DPRINTF(LOG_INST,("%08x: divu r%d, r%d, r%d\n", pc, rd, rs1, rs2));
         INST_STAT(ENUM_INST_DIVU);
         m_stats[STATS_DIVIDES]++;
+        is_div_inst = true;
         if (reg_rs2 != 0)
             reg_rd = (unsigned)reg_rs1 / (unsigned)reg_rs2;
         else
@@ -1450,6 +1492,7 @@ void Riscv::execute(void)
         DPRINTF(LOG_INST,("%08x: rem r%d, r%d, r%d\n", pc, rd, rs1, rs2));
         INST_STAT(ENUM_INST_REM);
         m_stats[STATS_DIVIDES]++;
+        is_div_inst = true;
 
         if((signed)reg_rs1 == INT32_MIN && (signed)reg_rs2 == -1)
             reg_rd = 0;
@@ -1465,6 +1508,7 @@ void Riscv::execute(void)
         DPRINTF(LOG_INST,("%08x: remu r%d, r%d, r%d\n", pc, rd, rs1, rs2));
         INST_STAT(ENUM_INST_REMU);
         m_stats[STATS_DIVIDES]++;
+        is_div_inst = true;
         if (reg_rs2 != 0)
             reg_rd = (unsigned)reg_rs1 % (unsigned)reg_rs2;
         else
@@ -1640,6 +1684,23 @@ void Riscv::execute(void)
     if (m_stats_if)
         m_stats_if->execute(m_pc, opcode);
 
+    // Update pipeline stages to track data forwarding
+    // Pipeline advancement: E1 -> E2 -> WB (then writeback completes)
+    // Move E2 to WB
+    m_pipe_wb = m_pipe_e2;
+    
+    // Move E1 to E2
+    m_pipe_e2 = m_pipe_e1;
+    
+    // Current instruction enters E1 stage
+    m_pipe_e1.valid = (rd != 0) && !take_exception;  // Only valid if writing to a register
+    m_pipe_e1.rd = rd;
+    m_pipe_e1.value = reg_rd;
+    m_pipe_e1.is_load = is_load_inst;
+    m_pipe_e1.is_mul = is_mul_inst;
+    m_pipe_e1.is_div = is_div_inst;
+    m_pipe_e1.pc = m_pc;
+
     if (!take_exception)
         m_pc = pc;
 }
@@ -1662,12 +1723,37 @@ void Riscv::step(void)
     // Execute instruction at current PC
     execute();
     
+    // Data Forwarding & Hazard Detection:
+    // Check if current instruction (now in E1) has data hazards with previous instructions
+    // Note: Since execute() already completed, m_pipe_e1 contains the instruction that just executed
+    bool data_hazard_detected = false;
+    bool forwarding_possible = true;
+    int stall_cycles = 0;
+    
+    // The instruction that just executed is now in E1
+    // We need to check if it had dependencies on instructions in E2 or WB stages
+    // But for simulation purposes, we track this retrospectively
+    
+    // For a more accurate model, we would check if previous instructions (now in E2/WB)
+    // wrote to registers that the current instruction needs
+    // Since we execute sequentially, we simulate: "would there have been a stall?"
+    
+    // Check if there was a load-use hazard:
+    // If the instruction in E2 (previous instruction) was a load, and current instruction
+    // depends on it, there would be a 1-cycle stall WITHOUT bypass
+    // WITH bypass (SUPPORT_LOAD_BYPASS), the stall is eliminated
+    
+    // For this simulation, we assume forwarding is enabled (like the hardware with SUPPORT_LOAD_BYPASS=1)
+    // So we only count stalls for cases where forwarding cannot help
+    
     // Pipeline-accurate cycle model:
     // - Base: 1 cycle per instruction (pipelined execution)
-    // - Stalls occur only for specific hazards:
+    // - Data forwarding eliminates most hazards
+    // - Stalls occur only for specific cases:
+    //   * Load-use hazard without bypass would cause 1-cycle stall (but we have bypass)
+    //   * Divide operations: Multi-cycle, stalls pipeline for 10 cycles
     //   * Branch resolution (Mode 0): All conditional branches stall 2 cycles
     //   * Branch misprediction (Mode 1-3): Only mispredictions stall 2 cycles
-    //   * Divide: Multi-cycle operation, stalls pipeline for 10 cycles
     uint32_t cycles = 1;  // Base: 1 cycle per instruction in pipelined processor
     
     // Branch penalties:
@@ -1833,6 +1919,20 @@ void Riscv::stats_dump(void)
             printf( "- Branches %d (%d%%)\n", m_stats[STATS_BRANCHES], (m_stats[STATS_BRANCHES] * 100)  / m_stats[STATS_INSTRUCTIONS]);
             printf( "- Multiplies %d (%d%%)\n", m_stats[STATS_MULTIPLIES], (m_stats[STATS_MULTIPLIES] * 100)  / m_stats[STATS_INSTRUCTIONS]);
             printf( "- Divides %d (%d%%)\n", m_stats[STATS_DIVIDES], (m_stats[STATS_DIVIDES] * 100)  / m_stats[STATS_INSTRUCTIONS]);
+            
+            // Data forwarding statistics
+            if (m_stats[STATS_DATA_HAZARDS] > 0)
+            {
+                printf( "\nData Forwarding:\n");
+                printf( "- Data Hazards Detected: %d\n", m_stats[STATS_DATA_HAZARDS]);
+                printf( "- Hazards Forwarded: %d\n", m_stats[STATS_HAZARDS_FORWARDED]);
+                printf( "- Stalls Required: %d\n", m_stats[STATS_STALLS_REQUIRED]);
+                if (m_stats[STATS_DATA_HAZARDS] > 0)
+                {
+                    double forward_rate = (double)m_stats[STATS_HAZARDS_FORWARDED] * 100.0 / (double)m_stats[STATS_DATA_HAZARDS];
+                    printf( "- Forwarding Success Rate: %.1f%%\n", forward_rate);
+                }
+            }
             
             // Branch prediction statistics
             if (m_branch_predictor_mode > 0 && m_stats[STATS_BRANCHES] > 0)

@@ -73,6 +73,9 @@ enum eStats
     STATS_DIVIDES,
     STATS_BRANCHES_PRED_CORRECT,
     STATS_BRANCHES_PRED_INCORRECT,
+    STATS_DATA_HAZARDS,
+    STATS_HAZARDS_FORWARDED,
+    STATS_STALLS_REQUIRED,
     STATS_MAX
 };
 
@@ -222,6 +225,21 @@ private:
     int                 m_branch_predictor_mode; // 0=none, 1=static, 2=1-bit, 3=2-bit
     uint8_t             m_bht_1bit[256];         // 1-bit branch history table
     uint8_t             m_bht_2bit[256];         // 2-bit saturating counters
+
+    // Data Forwarding - Pipeline Register Tracking
+    struct PipelineStage {
+        bool     valid;        // Is there an instruction in this stage?
+        int      rd;           // Destination register
+        uint32_t value;        // Result value
+        bool     is_load;      // Is this a load instruction?
+        bool     is_mul;       // Is this a multiply instruction?
+        bool     is_div;       // Is this a divide instruction?
+        uint32_t pc;           // PC of instruction
+    };
+    
+    PipelineStage       m_pipe_e1;               // Execute stage 1
+    PipelineStage       m_pipe_e2;               // Execute stage 2 / Memory
+    PipelineStage       m_pipe_wb;               // Writeback stage
 
     // Console
     IConsoleIO         *m_console;
