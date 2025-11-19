@@ -153,6 +153,42 @@ public:
 
     bool                error(bool terminal, const char *fmt, ...);
 
+        /* === New prediction/cache/hazard config fields === */
+
+    // Configurable predictor sizes
+    uint32_t            m_bht_size;       // entries (power of two)
+    uint8_t*            m_bht_1bit;       // 1-bit table (size m_bht_size)
+    uint8_t*            m_bht_2bit;       // 2-bit table (size m_bht_size) - Acts as Local Predictor in Tournament
+    uint8_t*            m_gshare_bht;     // GShare table (size m_bht_size) - For Tournament
+    uint8_t*            m_meta_predictor; // Meta predictor (size m_bht_size) - For Tournament
+
+    // GShare
+    uint32_t            m_ghr;            // global history register (lower bits)
+    uint8_t             m_ghr_bits;       // number of bits in GHR used (<= 16)
+
+    // BTB
+    struct BTBEntry { uint32_t tag; uint32_t target; bool valid; };
+    BTBEntry*           m_btb;            // BTB array
+    uint32_t            m_btb_size;       // BTB entries (power of two)
+
+    // Return address stack
+    uint32_t*           m_ras;            // simple RAS stack
+    uint32_t            m_ras_top;        // index
+    uint32_t            m_ras_size;       // entries
+
+    // Memory & cache model
+    uint32_t            m_load_latency;   // cycles for load hit
+    uint32_t            m_icache_miss_penalty; // cycles on i-cache miss
+    bool                m_icache_enabled; // enable I-cache model
+
+    // Setters (call from main)
+    void                set_bht_size(uint32_t size);
+    void                set_btb_size(uint32_t size);
+    void                set_ghr_bits(uint8_t bits);
+    void                set_ras_size(uint32_t size);
+    void                set_load_latency(uint32_t cycles);
+    void                set_icache_params(bool enable, uint32_t miss_penalty);
+
 protected:  
     void                execute(void);
     int                 load(uint32_t pc, uint32_t address, uint32_t *result, int width, bool signedLoad);
@@ -161,6 +197,7 @@ protected:
     // Branch prediction helpers
     bool                predict_branch(uint32_t pc, uint32_t target);
     void                update_branch_predictor(uint32_t pc, bool taken);
+    void                update_btb(uint32_t pc, uint32_t target);
     uint32_t            access_csr(uint32_t address, uint32_t data, bool set, bool clr);
     void                exception(uint32_t cause, uint32_t pc, uint32_t badaddr = 0);
 
@@ -222,14 +259,14 @@ private:
     IStatsInterface     *m_stats_if;
 
     // Branch Prediction (for cycle modeling)
-    int                 m_branch_predictor_mode; // 0=none, 1=static, 2=1-bit, 3=2-bit
-    uint8_t             m_bht_1bit[256];         // 1-bit branch history table
-    uint8_t             m_bht_2bit[256];         // 2-bit saturating counters
+    int                 m_branch_predictor_mode; // 0=none, 1=static, 2=1-bit, 3=2-bit, 4=GShare
 
     // Data Forwarding - Pipeline Register Tracking
     struct PipelineStage {
         bool     valid;        // Is there an instruction in this stage?
         int      rd;           // Destination register
+        int      rs1;          // Source register 1
+        int      rs2;          // Source register 2
         uint32_t value;        // Result value
         bool     is_load;      // Is this a load instruction?
         bool     is_mul;       // Is this a multiply instruction?

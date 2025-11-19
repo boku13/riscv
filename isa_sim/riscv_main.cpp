@@ -86,9 +86,15 @@ int riscv_main(cosim_cpu_api *sim, int argc, char *argv[])
     char *   dump_sym_start = NULL;
     char *   dump_sym_end   = NULL;
     int      branch_predictor_mode = 1;  // Default: static prediction
-    int c;
+    uint32_t opt_bht_size = 256;     // default
+    uint32_t opt_btb_size = 64;      // default 
+    uint8_t  opt_ghr_bits = 8;       // default 
+    uint32_t opt_ras_size = 16;      // default
+    uint32_t opt_load_latency = 0;   // default
+    uint32_t opt_icache_miss_penalty = 0; // default
+    int c; 
 
-    while ((c = getopt (argc, argv, "t:v:f:c:r:d:b:s:e:p:j:k:B:")) != -1)
+    while ((c = getopt (argc, argv, "t:v:f:c:r:d:b:s:e:p:j:k:B:H:T:G:R:L:M:")) != -1)
     {
         switch(c)
         {
@@ -130,6 +136,16 @@ int riscv_main(cosim_cpu_api *sim, int argc, char *argv[])
             case 'B':
                 branch_predictor_mode = strtoul(optarg, NULL, 0);
                 break;
+            case 'H': opt_bht_size = strtoul(optarg, NULL, 0); break;
+            case 'G': opt_ghr_bits = strtoul(optarg, NULL, 0); break;
+            case 'T': opt_btb_size = strtoul(optarg, NULL, 0); break;
+            case 'R': opt_ras_size = strtoul(optarg, NULL, 0); break;
+            case 'L': opt_load_latency = strtoul(optarg, NULL, 0); break;
+            // TODO: Add flag for cache miss penalty if needed, or reuse/add another flag
+            // For now, let's assume we might want to add it or just stick to what was requested.
+            // The user request mentioned "Cache miss penalties", but didn't specify a flag letter.
+            // I'll add 'M' for miss penalty.
+            case 'M': opt_icache_miss_penalty = strtoul(optarg, NULL, 0); break;
             case '?':
             default:
                 help = 1;   
@@ -148,7 +164,13 @@ int riscv_main(cosim_cpu_api *sim, int argc, char *argv[])
         fprintf (stderr,"-e 0xnnnn       = Trace from PC address\n");
         fprintf (stderr,"-b 0xnnnn       = Memory base address (for binary loads)\n");
         fprintf (stderr,"-s nnnn         = Memory size (for binary loads)\n");
-        fprintf (stderr,"-B [0-3]        = Branch predictor mode (0=none, 1=static, 2=1-bit BHT, 3=2-bit BHT)\n");
+        fprintf (stderr,"-B [0-5]        = Branch predictor mode (0=none, 1=static, 2=1-bit, 3=2-bit, 4=GShare, 5=BTB+GShare)\n");
+        fprintf (stderr,"-H nnnn         = BHT size (entries, power of two)\n");
+        fprintf (stderr,"-T nnnn         = BTB size (entries, power of two)\n");
+        fprintf (stderr,"-G n            = GHR bits (1-16)\n");
+        fprintf (stderr,"-R nnnn         = RAS size (entries)\n");
+        fprintf (stderr,"-L n            = Load-use latency (cycles)\n");
+        fprintf (stderr,"-M n            = I-Cache miss penalty (cycles)\n");
         fprintf (stderr,"-p dumpfile.bin = Post simulation memory dump file\n");
         fprintf (stderr,"-j sym_name     = Symbol for memory dump start\n");
         fprintf (stderr,"-k sym_name     = Symbol for memory dump end\n");
@@ -181,6 +203,13 @@ int riscv_main(cosim_cpu_api *sim, int argc, char *argv[])
 
         // Set branch predictor mode (cast to Riscv* to access extended API)
         ((Riscv*)sim)->set_branch_predictor(branch_predictor_mode);
+        // Apply microarchitectural configuration
+        ((Riscv*)sim)->set_bht_size(opt_bht_size);
+        ((Riscv*)sim)->set_btb_size(opt_btb_size);
+        ((Riscv*)sim)->set_ghr_bits(opt_ghr_bits);
+        ((Riscv*)sim)->set_ras_size(opt_ras_size);
+        ((Riscv*)sim)->set_load_latency(opt_load_latency);
+        ((Riscv*)sim)->set_icache_params(opt_icache_miss_penalty > 0, opt_icache_miss_penalty);
 
         // Enable trace?
         if (trace)
@@ -214,6 +243,9 @@ int riscv_main(cosim_cpu_api *sim, int argc, char *argv[])
         double elapsed = (end_time.tv_sec - start_time.tv_sec) + 
                         (end_time.tv_nsec - start_time.tv_nsec) / 1e9;
         
+        // Dump stats
+        ((Riscv*)sim)->stats_dump();
+
         printf("\n=== Simulation Performance ===\n");
         printf("Wall-clock time: %.3f seconds\n", elapsed);
         printf("Simulation speed: %.2f MIPS (Million Instructions Per Second)\n", 
